@@ -86,6 +86,13 @@ export type GameState = {
   slap1TouchId: number | null;
   joystick2: { active: boolean; x: number; y: number; dx: number; dy: number; touchId: number | null };
   slap2TouchId: number | null;
+  // Mobile UI Buttons State
+  mobileButtons: {
+    p1Attack: boolean;
+    p1Hide: boolean;
+    p2Attack: boolean;
+    p2Hide: boolean;
+  };
   // pause toggle edge
   pauseToggleEdge: boolean;
   // mode
@@ -190,6 +197,12 @@ export function createGameState(w: number, h: number): GameState {
     slap1TouchId: null,
     joystick2: { active: false, x: 0, y: 0, dx: 0, dy: 0, touchId: null },
     slap2TouchId: null,
+    mobileButtons: {
+      p1Attack: false,
+      p1Hide: false,
+      p2Attack: false,
+      p2Hide: false,
+    },
     pauseToggleEdge: false,
     mode: 'cpu',
     isOnlineHost: false,
@@ -833,94 +846,56 @@ function updatePlayer(state: GameState, p: Player, input: Input | null, dt: numb
     }
     // hide in bush when pressing H (need to be near a bush)
     // Allow slight movement so the player can walk into a bush while holding H
-    if (input.hide && !p.hidden && p.hideCooldown <= 0 && p.hideTimeLeft > 0 && m < 0.7) {
-      for (const o of state.obstacles) {
-        if (o.kind === 'bush') {
-          const bd = Math.hypot(p.pos.x - o.pos.x, p.pos.y - o.pos.y);
-          if (bd < (o.radius || 20) + p.radius + 15) {
-            p.hidden = true;
-            p.hideTimer = 0.1;
-            p.vel.x *= 0.2;
-            p.vel.y *= 0.2;
-            const dx = o.pos.x - p.pos.x;
-            const dy = o.pos.y - p.pos.y;
-            const d = Math.hypot(dx, dy) || 1;
-            const targetDist = (o.radius || 20) * 0.5;
-            p.pos.x = o.pos.x - (dx / d) * targetDist;
-            p.pos.y = o.pos.y - (dy / d) * targetDist;
-            break;
-          }
+    // --- NEW TELEPORT HIDE LOGIC (Role Restricted) ---
+    // Rule: ONLY the runner can hide. The slapper (isChaser) cannot.
+    if (input.hide && !p.isChaser && p.hideCooldown <= 0 && p.safeCooldown <= 0) {
+      const spots = state.obstacles.filter(o => o.kind === 'bush' || o.kind === 'tree' || o.kind === 'wall');
+      if (spots.length > 0) {
+        let filtered = spots;
+        if (p.hidden || p.safe) {
+          filtered = spots.filter(o => Math.hypot(o.pos.x - p.pos.x, o.pos.y - p.pos.y) > 40);
         }
-      }
-    }
-    // SAFE HIDE: if pressing H and near cover, become safe
-    // Since trees/walls are solid, "in cover" means "touching or very close"
-    if (input.hide && !p.hidden && p.safeCooldown <= 0 && p.safeTimeLeft > 0) {
-      const inCover = playerIsInsideCover(state, p);
-      if (inCover) {
-        const wasAlreadySafe = p.safe;
-        p.safe = true;
-        p.safeTimeLeft = 5;
-        p.vel.x *= 0.2;
-        p.vel.y *= 0.2;
-        // visual feedback on activation
-        if (!wasAlreadySafe && p.isLocal) {
-          addFloatText(state, { x: p.pos.x, y: p.pos.y - p.radius - 22 }, '🛡️ COVERED!', '#22c55e');
+        if (filtered.length === 0) filtered = spots;
+        const target = filtered[Math.floor(Math.random() * filtered.length)];
+        
+        spawnHitParticles(state, { ...p.pos }, '#a78bfa');
+        p.pos = { ...target.pos };
+        p.vel = { x: 0, y: 0 };
+        
+        if (target.kind === 'bush') {
+          p.hidden = true; p.safe = false;
+        } else {
+          p.safe = true; p.hidden = false;
         }
+        
+        p.hideTimeLeft = 5.0;
+        p.safeTimeLeft = 5.0;
+        p.hideCooldown = 0;
+        p.safeCooldown = 0;
+        spawnHitParticles(state, { ...p.pos }, '#22d3ee');
+        input.hide = false; 
       }
     }
-    if (p.hidden && m > 0.3) {
-      p.hidden = false;
-      p.hideTimeLeft = 0;
-    } else if (p.hidden && !input.hide) {
-      p.hidden = false;
-      p.hideCooldown = state.hideCooldownBase;
-    }
-    // tick down safe time
-    if (p.safe) {
-      p.safeTimeLeft -= dt;
-      // If player is still in cover, they stay safe (no need to keep holding H).
-      // If they walk out of cover, they become exposed immediately.
-      const stillCovered = playerIsInsideCover(state, p);
-      if (p.safeTimeLeft <= 0 || !stillCovered) {
-        const wasJustOut = p.safe && !stillCovered;
-        p.safe = false;
-        p.safeTimeLeft = 0;
-        p.safeCooldown = state.hideCooldownBase;
-        if (wasJustOut && p.isLocal) {
-          addFloatText(state, { x: p.pos.x, y: p.pos.y - p.radius - 20 }, 'EXPOSED!', '#ef4444');
-        }
-      }
-    } else {
-      if (p.safeCooldown <= 0 && p.safeTimeLeft < 5) {
-        p.safeTimeLeft = 5;
-      }
-    }
-    if (p.safeCooldown > 0) {
-      p.safeCooldown -= dt;
-      if (p.safeCooldown < 0) p.safeCooldown = 0;
-    }
-    // tick down hide duration only while actually hidden
+
+    // Tick down state
     if (p.hidden) {
       p.hideTimeLeft -= dt;
-      p.hideTimer -= dt;
-      if (p.hideTimeLeft <= 0 || p.hideTimer <= 0) {
+      if (p.hideTimeLeft <= 0) {
         p.hidden = false;
-        p.hideTimeLeft = 0;
-        // start cooldown based on game length (shorter for short games, longer for long)
-        p.hideCooldown = state.hideCooldownBase;
+        p.hideCooldown = 10.0;
       }
-    } else {
-      // progressively refill hide time when not on cooldown
-      // (not instant - takes some time to refill so you can't spam)
-      if (p.hideCooldown <= 0 && p.hideTimeLeft < 5) {
-        p.hideTimeLeft = Math.min(5, p.hideTimeLeft + dt * state.hideRefillRate);
-      }
-    }
-    // cooldown tick
-    if (p.hideCooldown > 0) {
+    } else if (p.hideCooldown > 0) {
       p.hideCooldown -= dt;
-      if (p.hideCooldown < 0) p.hideCooldown = 0;
+    }
+
+    if (p.safe) {
+      p.safeTimeLeft -= dt;
+      if (p.safeTimeLeft <= 0) {
+        p.safe = false;
+        p.safeCooldown = 10.0;
+      }
+    } else if (p.safeCooldown > 0) {
+      p.safeCooldown -= dt;
     }
     if (input.action && p.slapAnim <= 0) {
       p.slapAnim = 0.001;
@@ -945,16 +920,13 @@ function updatePlayer(state: GameState, p: Player, input: Input | null, dt: numb
   spawnSlapTrail(state, p);
 }
 
-// Check if a player is currently touching or very close to a tree/wall (for cover)
-// Since trees & walls are SOLID, the player can never overlap them; they can only touch.
-// So we use a generous "close enough" radius to detect cover.
-export function playerIsInsideCover(state: GameState, p: Player): boolean {
+// Check if a player is currently inside (overlapping) a tree or wall
+function playerIsInsideCover(state: GameState, p: Player): boolean {
   for (const o of state.obstacles) {
     if (o.kind === 'bush') continue;
     if (o.kind === 'tree') {
       const d = Math.hypot(p.pos.x - o.pos.x, p.pos.y - o.pos.y);
-      // touching or within 8px of the tree edge
-      if (d < (o.radius || 20) + p.radius + 8) return true;
+      if (d < (o.radius || 20) + p.radius - 2) return true;
     } else if (o.kind === 'wall') {
       const cos = Math.cos(-(o.angle || 0));
       const sin = Math.sin(-(o.angle || 0));
@@ -962,8 +934,7 @@ export function playerIsInsideCover(state: GameState, p: Player): boolean {
       const ly = (p.pos.x - o.pos.x) * sin + (p.pos.y - o.pos.y) * cos;
       const halfW = (o.w || 0) / 2;
       const halfH = (o.h || 0) / 2;
-      // touching or within 8px of wall edge
-      if (Math.abs(lx) < halfW + p.radius + 8 && Math.abs(ly) < halfH + p.radius + 8) return true;
+      if (Math.abs(lx) < halfW + 2 && Math.abs(ly) < halfH + 2) return true;
     }
   }
   return false;
@@ -1028,9 +999,12 @@ function checkSlap(state: GameState, chaser: Player, runner: Player) {
   if (chaser.slapAnim < 0.4 || chaser.slapAnim > 0.65) return;
   if (state.hitCooldown > 0) return;
   if (runner.hidden) return; // can't slap a hidden player
-  if (runner.safe) return; // can't slap a player who is behind cover
-  // LOS check: if any tree or wall is between chaser and runner, can't slap
-  if (isLineBlockedByObstacles(state, chaser.pos, runner.pos)) {
+    if (runner.safe) {
+      addFloatText(state, { x: runner.pos.x, y: runner.pos.y - 20 }, '🛡️ BLOCKED', '#fbbf24');
+      return; 
+    }
+    // LOS check: if any tree or wall is between chaser and runner, can't slap
+    if (isLineBlockedByObstacles(state, chaser.pos, runner.pos)) {
     if (!state.floats.some(f => f.text === '🛡️')) {
       addFloatText(state, { x: chaser.pos.x, y: chaser.pos.y - 30 }, '🛡️', '#fbbf24');
     }
@@ -1139,23 +1113,46 @@ export function step(state: GameState, dt: number) {
     }
 
     // determine AI for chaser
-    const chaserIsAI = state.mode === 'cpu' ? chaser.id === 'p2' : (state.mode === 'local' ? chaser.id === 'p2' : (!chaser.isLocal));
-    const runnerIsAI = state.mode === 'cpu' ? runner.id === 'p2' : (state.mode === 'local' ? runner.id === 'p2' : (!runner.isLocal));
+    // AI only plays in 'cpu' mode for P2.
+    // In 'local' and 'online' modes, both players are human-controlled.
+    const chaserIsAI = state.mode === 'cpu' && chaser.id === 'p2';
+    const runnerIsAI = state.mode === 'cpu' && runner.id === 'p2';
 
+    // Helper to merge hardware input with mobile button states
+    const getCombinedInput = (playerId: 'p1' | 'p2'): Input => {
+      const hw = playerId === 'p1' ? state.input1 : state.input2;
+      const isP1 = playerId === 'p1';
+      return {
+        ...hw,
+        action: hw.action || (isP1 ? state.mobileButtons.p1Attack : state.mobileButtons.p2Attack),
+        hide: hw.hide || (isP1 ? state.mobileButtons.p1Hide : state.mobileButtons.p2Hide)
+      };
+    };
+
+    // 1. CHASER UPDATE
     if (chaserIsAI) {
       aiChasePlayer(state, chaser, runner, dt);
-      // integrate AI position from velocity, clamp, collide
       integratePlayer(state, chaser, dt);
     } else {
-      const inp = chaser.id === 'p1' ? state.input1 : state.input2;
-      updatePlayer(state, chaser, inp, dt);
+      const isLocalHuman = (state.mode === 'local') || (state.mode === 'online' && chaser.isLocal) || (state.mode === 'cpu' && chaser.id === 'p1');
+      if (isLocalHuman) {
+        updatePlayer(state, chaser, getCombinedInput(chaser.id), dt);
+      } else if (state.mode !== 'online') {
+        integratePlayer(state, chaser, dt);
+      }
     }
+
+    // 2. RUNNER UPDATE
     if (runnerIsAI) {
       aiRunFrom(state, runner, chaser, dt);
       integratePlayer(state, runner, dt);
     } else {
-      const inp = runner.id === 'p1' ? state.input1 : state.input2;
-      updatePlayer(state, runner, inp, dt);
+      const isLocalHuman = (state.mode === 'local') || (state.mode === 'online' && runner.isLocal) || (state.mode === 'cpu' && runner.id === 'p1');
+      if (isLocalHuman) {
+        updatePlayer(state, runner, getCombinedInput(runner.id), dt);
+      } else if (state.mode !== 'online') {
+        integratePlayer(state, runner, dt);
+      }
     }
     checkSlap(state, chaser, runner);
     state.timeLeft -= dt;
@@ -1617,22 +1614,35 @@ function drawHideHints(ctx: CanvasRenderingContext2D, state: GameState) {
     }
   }
   // COVER hints: trees and walls
-  // Show cover hint for players near trees/walls
-  for (const p of [state.p1, state.p2]) {
-    if (p.hidden || p.safe) continue;
-    if (p.safeCooldown > 0 || p.safeTimeLeft <= 0) continue;
-    if (playerIsInsideCover(state, p)) {
-      ctx.save();
-      ctx.globalAlpha = 0.6 + Math.sin(performance.now() * 0.005) * 0.3;
-      ctx.fillStyle = '#22c55e';
-      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-      ctx.lineWidth = 3;
-      ctx.font = 'bold 11px Inter, sans-serif';
-      ctx.textAlign = 'center';
-      const labelY = p.pos.y - p.radius - 16;
-      ctx.strokeText('TAKE COVER [H]', p.pos.x, labelY);
-      ctx.fillText('TAKE COVER [H]', p.pos.x, labelY);
-      ctx.restore();
+  for (const o of state.obstacles) {
+    if (o.kind === 'bush') continue;
+    for (const p of [state.p1, state.p2]) {
+      if (p.hidden || p.safe) continue;
+      if (p.safeCooldown > 0 || p.safeTimeLeft <= 0) continue;
+      // check if player is overlapping this obstacle
+      let near = false;
+      if (o.kind === 'tree') {
+        const d = Math.hypot(p.pos.x - o.pos.x, p.pos.y - o.pos.y);
+        if (d < (o.radius || 20) + p.radius - 2) near = true;
+      } else if (o.kind === 'wall') {
+        const cos = Math.cos(-(o.angle || 0));
+        const sin = Math.sin(-(o.angle || 0));
+        const lx = (p.pos.x - o.pos.x) * cos - (p.pos.y - o.pos.y) * sin;
+        const ly = (p.pos.x - o.pos.x) * sin + (p.pos.y - o.pos.y) * cos;
+        const halfW = (o.w || 0) / 2;
+        const halfH = (o.h || 0) / 2;
+        if (Math.abs(lx) < halfW + 2 && Math.abs(ly) < halfH + 2) near = true;
+      }
+      if (near) {
+        ctx.save();
+        ctx.globalAlpha = 0.5 + Math.sin(performance.now() * 0.005) * 0.3;
+        ctx.fillStyle = '#22c55e';
+        ctx.font = 'bold 9px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        const labelY = p.pos.y - p.radius - 14;
+        ctx.fillText('TAKE COVER [H]', p.pos.x, labelY);
+        ctx.restore();
+      }
     }
   }
 }

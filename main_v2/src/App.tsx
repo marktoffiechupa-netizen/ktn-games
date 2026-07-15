@@ -20,9 +20,7 @@ export default function App() {
 
   // touch refs
   const touch1BaseRef = useRef<{ x: number; y: number; id: number } | null>(null);
-  const touch1SlapRef = useRef<number | null>(null);
   const touch2BaseRef = useRef<{ x: number; y: number; id: number } | null>(null);
-  const touch2SlapRef = useRef<number | null>(null);
 
   // network
   const peerRef = useRef<PeerJSInstance | null>(null);
@@ -215,111 +213,96 @@ export default function App() {
     if (!canvas) return;
 
     const onTouchStart = (e: TouchEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'BUTTON' || target.closest('button')) return;
+      
       e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const s = stateRef.current;
+
       for (let i = 0; i < e.changedTouches.length; i++) {
         const t = e.changedTouches[i];
-        const rect = canvas.getBoundingClientRect();
         const x = t.clientX - rect.left;
         const y = t.clientY - rect.top;
-        const isRightSide = x > rect.width / 2;
-        // For local multiplayer, split vertically into 2 halves
-        const inTopHalf = y < rect.height / 2;
-        if (isRightSide) {
-          // slap
-          if (inTopHalf) {
-            if (touch1SlapRef.current === null) {
-              touch1SlapRef.current = t.identifier;
-              input1Ref.current.action = true;
-            }
-          } else {
-            if (touch2SlapRef.current === null) {
-              touch2SlapRef.current = t.identifier;
-              input2Ref.current.action = true;
-            }
+        
+        // Split screen based on mode
+        const isLocal = s?.mode === 'local';
+        const isP2Side = isLocal && x > rect.width / 2;
+
+        if (!isP2Side) {
+          if (touch1BaseRef.current === null) {
+            touch1BaseRef.current = { x, y, id: t.identifier };
+            if (s) { s.joystick1.active = true; s.joystick1.x = x; s.joystick1.y = y; s.joystick1.dx = 0; s.joystick1.dy = 0; }
           }
         } else {
-          // joystick
-          if (inTopHalf) {
-            if (touch1BaseRef.current === null) {
-              touch1BaseRef.current = { x, y, id: t.identifier };
-              const s = stateRef.current;
-              if (s) {
-                s.joystick1.active = true;
-                s.joystick1.x = x; s.joystick1.y = y;
-                s.joystick1.dx = 0; s.joystick1.dy = 0;
-                s.joystick1.touchId = t.identifier;
-              }
-            }
-          } else {
-            if (touch2BaseRef.current === null) {
-              touch2BaseRef.current = { x, y, id: t.identifier };
-              const s = stateRef.current;
-              if (s) {
-                s.joystick2.active = true;
-                s.joystick2.x = x; s.joystick2.y = y;
-                s.joystick2.dx = 0; s.joystick2.dy = 0;
-                s.joystick2.touchId = t.identifier;
-              }
-            }
+          if (touch2BaseRef.current === null) {
+            touch2BaseRef.current = { x, y, id: t.identifier };
+            if (s) { s.joystick2.active = true; s.joystick2.x = x; s.joystick2.y = y; s.joystick2.dx = 0; s.joystick2.dy = 0; }
           }
         }
       }
     };
     const onTouchMove = (e: TouchEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'BUTTON' || target.closest('button')) return;
+
       e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const s = stateRef.current;
+
       for (let i = 0; i < e.changedTouches.length; i++) {
         const t = e.changedTouches[i];
-        const rect = canvas.getBoundingClientRect();
         const x = t.clientX - rect.left;
         const y = t.clientY - rect.top;
+
         if (touch1BaseRef.current && t.identifier === touch1BaseRef.current.id) {
           const dx = x - touch1BaseRef.current.x;
           const dy = y - touch1BaseRef.current.y;
-          const max = 60;
+          const max = 40;
           const len = Math.hypot(dx, dy);
           const cdx = len > max ? (dx / len) * max : dx;
           const cdy = len > max ? (dy / len) * max : dy;
-          const s = stateRef.current;
           if (s) { s.joystick1.dx = cdx; s.joystick1.dy = cdy; }
           input1Ref.current.move = { x: cdx / max, y: cdy / max };
-          // hide if joystick near center and pressed
         }
         if (touch2BaseRef.current && t.identifier === touch2BaseRef.current.id) {
           const dx = x - touch2BaseRef.current.x;
           const dy = y - touch2BaseRef.current.y;
-          const max = 60;
+          const max = 40;
           const len = Math.hypot(dx, dy);
           const cdx = len > max ? (dx / len) * max : dx;
           const cdy = len > max ? (dy / len) * max : dy;
-          const s = stateRef.current;
           if (s) { s.joystick2.dx = cdx; s.joystick2.dy = cdy; }
           input2Ref.current.move = { x: cdx / max, y: cdy / max };
         }
       }
     };
     const onTouchEnd = (e: TouchEvent) => {
-      e.preventDefault();
+      const s = stateRef.current;
       for (let i = 0; i < e.changedTouches.length; i++) {
         const t = e.changedTouches[i];
         if (touch1BaseRef.current && t.identifier === touch1BaseRef.current.id) {
           touch1BaseRef.current = null;
-          const s = stateRef.current;
-          if (s) { s.joystick1.active = false; s.joystick1.dx = 0; s.joystick1.dy = 0; }
+          if (s) {
+            s.joystick1.active = false;
+            s.joystick1.dx = 0;
+            s.joystick1.dy = 0;
+          }
           input1Ref.current.move = { x: 0, y: 0 };
         }
         if (touch2BaseRef.current && t.identifier === touch2BaseRef.current.id) {
           touch2BaseRef.current = null;
-          const s = stateRef.current;
-          if (s) { s.joystick2.active = false; s.joystick2.dx = 0; s.joystick2.dy = 0; }
+          if (s) {
+            s.joystick2.active = false;
+            s.joystick2.dx = 0;
+            s.joystick2.dy = 0;
+          }
           input2Ref.current.move = { x: 0, y: 0 };
         }
-        if (touch1SlapRef.current !== null && t.identifier === touch1SlapRef.current) {
-          touch1SlapRef.current = null;
-          input1Ref.current.action = false;
-        }
-        if (touch2SlapRef.current !== null && t.identifier === touch2SlapRef.current) {
-          touch2SlapRef.current = null;
-          input2Ref.current.action = false;
+        
+        // Clean up mobile buttons if they were released from a non-button area (safety)
+        if (s && s.mode === 'local') {
+          // In local mode, we're being conservative with resets
         }
       }
     };
@@ -695,29 +678,74 @@ export default function App() {
     p2SafeCooldown: live.p2.safeCooldown,
     hideCooldownBase: live.hideCooldownBase,
     hideRefillRate: live.hideRefillRate,
+    p1IsChaser: live.p1.isChaser,
+    p2IsChaser: live.p2.isChaser,
   } : null;
 
   return (
     <div ref={containerRef} className="relative w-full h-full overflow-hidden bg-slate-950 text-white select-none">
       <canvas ref={canvasRef} className="block w-full h-full" />
 
-      {/* Touch joystick overlays */}
-      {live && live.joystick1.active && (
-        <div className="pointer-events-none absolute inset-0">
-          <div className="absolute" style={{ left: live.joystick1.x - 36, top: live.joystick1.y - 36, width: 72, height: 72 }}>
-            <div className="w-full h-full rounded-full border-2 border-cyan-400/60 bg-cyan-400/10 backdrop-blur-sm" />
-            <div className="absolute rounded-full bg-cyan-400/70 border-2 border-white shadow-lg shadow-cyan-400/50"
-              style={{ left: 28 + live.joystick1.dx - 22, top: 28 + live.joystick1.dy - 22, width: 44, height: 44 }} />
+      {/* Mobile Controls Overlay */}
+      {live && (screen === 'playing') && (
+        <div className="absolute bottom-0 left-0 right-0 h-[45%] flex pointer-events-none md:hidden z-50 select-none touch-none">
+          {/* Player 1 Region */}
+          <div className="flex-1 flex flex-col items-center justify-end pb-8 px-4 gap-4 pointer-events-auto border-r border-white/10">
+            <div className="relative w-32 h-32 bg-slate-800/40 rounded-full border-4 border-cyan-500/30 flex items-center justify-center overflow-hidden">
+               {/* Joystick Visual */}
+               <div className="absolute w-full h-full pointer-events-none opacity-20 bg-[radial-gradient(circle,_var(--tw-gradient-stops))] from-cyan-500/50 to-transparent" />
+               <div className="w-12 h-12 bg-cyan-500 rounded-full shadow-lg shadow-cyan-500/50" 
+                    style={{ transform: `translate(${live.joystick1.dx}px, ${live.joystick1.dy}px)` }} />
+            </div>
+            <div className="flex gap-4">
+              <button 
+                className="w-16 h-16 bg-red-600/80 rounded-full border-4 border-red-400 flex items-center justify-center text-2xl font-black shadow-xl active:scale-90 transition-transform active:bg-red-500"
+                onTouchStart={(e) => { e.stopPropagation(); if(stateRef.current) stateRef.current.mobileButtons.p1Attack = true; }}
+                onTouchEnd={(e) => { e.stopPropagation(); if(stateRef.current) stateRef.current.mobileButtons.p1Attack = false; }}
+              >A</button>
+              {!hud?.p1IsChaser && (
+                <button 
+                  className="w-16 h-16 bg-green-600/80 rounded-full border-4 border-green-400 flex items-center justify-center text-2xl font-black shadow-xl active:scale-90 transition-transform active:bg-green-500"
+                  onTouchStart={(e) => { e.stopPropagation(); if(stateRef.current) stateRef.current.mobileButtons.p1Hide = true; }}
+                  onTouchEnd={(e) => { e.stopPropagation(); if(stateRef.current) stateRef.current.mobileButtons.p1Hide = false; }}
+                >H</button>
+              )}
+            </div>
+            <div className="bg-cyan-900/60 backdrop-blur-sm px-3 py-0.5 rounded-full border border-cyan-400/40 text-[10px] font-black text-white uppercase tracking-tighter">
+              {hud?.p1Name} (P1)
+            </div>
           </div>
-        </div>
-      )}
-      {live && live.mode === 'local' && live.joystick2.active && (
-        <div className="pointer-events-none absolute inset-0">
-          <div className="absolute" style={{ left: live.joystick2.x - 36, top: live.joystick2.y - 36, width: 72, height: 72 }}>
-            <div className="w-full h-full rounded-full border-2 border-pink-400/60 bg-pink-400/10 backdrop-blur-sm" />
-            <div className="absolute rounded-full bg-pink-400/70 border-2 border-white shadow-lg shadow-pink-400/50"
-              style={{ left: 28 + live.joystick2.dx - 22, top: 28 + live.joystick2.dy - 22, width: 44, height: 44 }} />
-          </div>
+
+          {/* Player 2 Region (Only in Local Mode) */}
+          {live.mode === 'local' ? (
+            <div className="flex-1 flex flex-col items-center justify-end pb-8 px-4 gap-4 pointer-events-auto">
+              <div className="relative w-32 h-32 bg-slate-800/40 rounded-full border-4 border-pink-500/30 flex items-center justify-center overflow-hidden">
+                <div className="absolute w-full h-full pointer-events-none opacity-20 bg-[radial-gradient(circle,_var(--tw-gradient-stops))] from-pink-500/50 to-transparent" />
+                <div className="w-12 h-12 bg-pink-500 rounded-full shadow-lg shadow-pink-500/50"
+                     style={{ transform: `translate(${live.joystick2.dx}px, ${live.joystick2.dy}px)` }} />
+              </div>
+              <div className="flex gap-4">
+                <button 
+                  className="w-16 h-16 bg-red-600/80 rounded-full border-4 border-red-400 flex items-center justify-center text-2xl font-black shadow-xl active:scale-90 transition-transform active:bg-red-500"
+                  onTouchStart={(e) => { e.stopPropagation(); if(stateRef.current) stateRef.current.mobileButtons.p2Attack = true; }}
+                  onTouchEnd={(e) => { e.stopPropagation(); if(stateRef.current) stateRef.current.mobileButtons.p2Attack = false; }}
+                >A</button>
+                {!hud?.p2IsChaser && (
+                  <button 
+                    className="w-16 h-16 bg-green-600/80 rounded-full border-4 border-green-400 flex items-center justify-center text-2xl font-black shadow-xl active:scale-90 transition-transform active:bg-green-500"
+                    onTouchStart={(e) => { e.stopPropagation(); if(stateRef.current) stateRef.current.mobileButtons.p2Hide = true; }}
+                    onTouchEnd={(e) => { e.stopPropagation(); if(stateRef.current) stateRef.current.mobileButtons.p2Hide = false; }}
+                  >H</button>
+                )}
+              </div>
+              <div className="bg-pink-900/60 backdrop-blur-sm px-3 py-0.5 rounded-full border border-pink-400/40 text-[10px] font-black text-white uppercase tracking-tighter">
+                {hud?.p2Name} (P2)
+              </div>
+            </div>
+          ) : (
+             /* Right side spacer for single player/online */
+             <div className="flex-1 pointer-events-none" />
+          )}
         </div>
       )}
 
@@ -729,7 +757,6 @@ export default function App() {
               name={hud.p2Name}
               character={hud.p2Char}
               score={hud.p2Score}
-              side="left"
               isChaser={hud.currentTurn === 2}
               hideTime={hud.p2HideTime}
               hideCooldown={hud.p2HideCooldown}
@@ -739,7 +766,6 @@ export default function App() {
               safeCooldown={hud.p2SafeCooldown}
               hideCooldownBase={hud.hideCooldownBase}
             />
-            {/* spacer for symmetry */}
             <div className="flex flex-col items-center gap-1">
               <div className={`bg-slate-900/70 border-2 rounded-2xl px-3 py-1 sm:px-4 sm:py-2 backdrop-blur-md ${hud.timeLeft <= 5 ? 'border-red-400 animate-pulse' : 'border-purple-400/60'}`}>
                 <div className="text-[10px] sm:text-xs font-bold text-purple-200 tracking-widest text-center">
@@ -758,7 +784,6 @@ export default function App() {
               name={hud.p1Name}
               character={hud.p1Char}
               score={hud.p1Score}
-              side="right"
               isChaser={hud.currentTurn === 1}
               hideTime={hud.p1HideTime}
               hideCooldown={hud.p1HideCooldown}
@@ -816,17 +841,6 @@ export default function App() {
               <div className="text-5xl sm:text-6xl mb-2 bounce-soft inline-block">✋💥</div>
               <h1 className="text-4xl sm:text-5xl font-black bg-gradient-to-r from-pink-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent drop-shadow-lg">SLAP DASH!</h1>
               <p className="text-purple-200/80 text-sm mt-2">Chase • Hide • Slap</p>
-              <div className="flex items-center justify-center gap-2 mt-3">
-                <div className="h-px w-8 bg-gradient-to-r from-transparent to-purple-400/50"></div>
-                <span className="text-[10px] uppercase tracking-[0.3em] text-purple-300/70 font-semibold">a game by</span>
-                <div className="h-px w-8 bg-gradient-to-l from-transparent to-purple-400/50"></div>
-              </div>
-              <div
-                className="text-3xl font-black italic bg-gradient-to-r from-pink-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent drop-shadow-[0_0_10px_rgba(168,85,247,0.7)] mt-1"
-                style={{ fontFamily: "'Brush Script MT', 'Segoe Script', cursive" }}
-              >
-                Ktn
-              </div>
             </div>
 
             <div className="mt-5 space-y-2">
@@ -1127,34 +1141,16 @@ export default function App() {
 
             {showScores && <HighScoreBoard scores={scores} onClear={() => { clearScores(); setScores([]); }} />}
 
-            {/* Ktn signature on the result page */}
-            <div className="mt-5 pt-4 border-t border-slate-700/50 flex items-center justify-center gap-2">
-              <div className="h-px flex-1 bg-gradient-to-r from-transparent via-purple-400/40 to-transparent"></div>
-              <span className="text-[10px] uppercase tracking-[0.3em] text-purple-300/60 font-semibold">crafted by</span>
-              <div
-                className="text-2xl font-black italic bg-gradient-to-r from-pink-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent drop-shadow-[0_0_8px_rgba(168,85,247,0.6)]"
-                style={{ fontFamily: "'Brush Script MT', 'Segoe Script', cursive" }}
-              >
-                Ktn
+            {/* Watermark */}
+            <div className="mt-8 text-center opacity-30 select-none">
+              <span className="text-xs font-mono tracking-[0.3em] text-slate-400">MADE BY</span>
+              <div className="text-xl font-black tracking-widest bg-gradient-to-r from-slate-400 to-slate-600 bg-clip-text text-transparent">
+                Ktn'
               </div>
-              <div className="h-px flex-1 bg-gradient-to-l from-transparent via-purple-400/40 to-transparent"></div>
             </div>
           </div>
         </div>
       )}
-
-      {/* Watermark - always visible in bottom-right corner */}
-      <div className="pointer-events-none absolute bottom-2 right-3 select-none z-50">
-        <div className="flex items-center gap-1.5 opacity-40 hover:opacity-70 transition-opacity">
-          <span className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">made by</span>
-          <span
-            className="text-lg font-black italic bg-gradient-to-r from-pink-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent drop-shadow-[0_0_6px_rgba(168,85,247,0.6)]"
-            style={{ fontFamily: "'Brush Script MT', 'Segoe Script', cursive" }}
-          >
-            Ktn
-          </span>
-        </div>
-      </div>
     </div>
   );
 }
@@ -1192,29 +1188,26 @@ function PlayerConfig({ label, name, setName, character, setCharacter, accent }:
   );
 }
 
-function PlayerScoreCard({ name, character, score, isChaser, hideTime, hideCooldown, hidden, safe, safeTime, safeCooldown, hideCooldownBase }: { name: string; character: 'boy' | 'girl'; score: number; side: 'left' | 'right'; isChaser: boolean; hideTime: number; hideCooldown: number; hidden: boolean; safe: boolean; safeTime: number; safeCooldown: number; hideCooldownBase: number }) {
+function PlayerScoreCard({ name, character, score, isChaser, hideTime, hideCooldown, hidden, safe, safeTime, safeCooldown, hideCooldownBase }: { name: string; character: 'boy' | 'girl'; score: number; isChaser: boolean; hideTime: number; hideCooldown: number; hidden: boolean; safe: boolean; safeTime: number; safeCooldown: number; hideCooldownBase: number }) {
   const isGirl = character === 'girl';
   const emoji = isGirl ? '👧' : '👦';
   let hideStatus = '🌿';
-  let hideLabel = `${hideTime.toFixed(1)}s`;
-  let hideColor = 'text-green-200';
-  let progressPct = (hideTime / 5) * 100;
-  if (hidden) {
-    hideStatus = '🫥';
-    hideLabel = `BUSH ${hideTime.toFixed(1)}s`;
-    hideColor = 'text-green-300';
-    progressPct = (hideTime / 5) * 100;
-  } else if (safe) {
-    hideStatus = '🛡️';
-    hideLabel = `COVER ${safeTime.toFixed(1)}s`;
-    hideColor = 'text-emerald-300';
-    progressPct = (safeTime / 5) * 100;
+  let hideLabel = 'READY';
+  let hideColor = 'text-green-400';
+  let progressPct = 100;
+  
+  if (hidden || safe) {
+    const remaining = hidden ? hideTime : safeTime;
+    hideStatus = hidden ? '🫥' : '🛡️';
+    hideLabel = `HIDING ${remaining.toFixed(1)}s`;
+    hideColor = 'text-blue-400';
+    progressPct = (remaining / 5) * 100;
   } else if (hideCooldown > 0 || safeCooldown > 0) {
     const cd = Math.max(hideCooldown, safeCooldown);
     hideStatus = '⏳';
-    hideLabel = `CD ${cd.toFixed(1)}s`;
-    hideColor = 'text-red-300';
-    progressPct = (cd / hideCooldownBase) * 100;
+    hideLabel = `COOLDOWN ${cd.toFixed(1)}s`;
+    hideColor = 'text-red-400';
+    progressPct = ((10 - cd) / 10) * 100; // Bar fills as cooldown recovers
   }
   return (
     <div className={`${isGirl ? 'bg-pink-500/20 border-pink-400/60 shadow-pink-500/20' : 'bg-cyan-500/20 border-cyan-400/60 shadow-cyan-500/20'} border-2 backdrop-blur-md rounded-2xl px-3 py-2 sm:px-4 sm:py-2 shadow-lg pop-in min-w-[110px]`}>

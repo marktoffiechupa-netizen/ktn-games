@@ -58,22 +58,8 @@ export type Player = {
 export const HIDE_MAX_DURATION = 5.0; // seconds of hide time
 export const HIDE_COOLDOWN_BASE = 10.0; // base cooldown in seconds
 
-// Calculate the hide cooldown based on the round duration.
-// Short games -> faster refill. Long games -> slightly slower.
-// Tuned so:
-  //  10s game -> 6.0s cooldown
-  //  20s game -> 7.0s cooldown
-  //  30s game -> 8.0s cooldown
-  //  60s game -> 9.0s cooldown
-  // 300s game -> 10.0s cooldown
-  // 600s game -> 11.0s cooldown
-export function getHideCooldown(turnDuration: number): number {
-  if (turnDuration <= 10) return 6.0;
-  if (turnDuration <= 20) return 7.0;
-  if (turnDuration <= 30) return 8.0;
-  if (turnDuration <= 60) return 9.0;
-  if (turnDuration <= 300) return 10.0;
-  return 11.0;
+export function getHideCooldown(_turnDuration: number): number {
+  return 10.0; // Fixed 10s cooldown as per new requirements
 }
 
 export type Particle = {
